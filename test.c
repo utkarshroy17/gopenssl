@@ -5,64 +5,97 @@
 # include  "openssl/err.h"
 # include  "openssl/sha.h"
 # include  "openssl/aes.h"
+# include  "openssl/evp.h"
 # include  "openssl/rand.h"
+
+int calc_sha512(char *path, char output[65]) {
+
+    FILE *file = fopen(path, "rb");
+    if(!file)
+        return -1;
+
+    unsigned char hash[SHA512_DIGEST_LENGTH];
+
+    SHA512_CTX sha512;
+    SHA512_Init(&sha512);
+    const int bufSize = 32768;
+    char *buffer = malloc(bufSize);
+    int bytesRead = 0;
+    if(!buffer)
+        return -1;
+    
+    while((bytesRead = fread(buffer, 1, bufSize, file))) {
+        SHA512_Update(&sha512, buffer, bytesRead);
+    }
+
+    SHA512_Final(hash, &sha512);
+
+    for (int i = 0; i<SHA512_DIGEST_LENGTH; i++) {
+        printf("%02x", hash[i]);
+    }
+    printf("\n");
+
+    output[64] = 0;
+    fclose(file);
+    free(buffer);
+    return 0;
+}
+
+void PBKDF2_HMAC_SHA_512(const char* pass, int passlen, const unsigned char* salt, int saltlen, int32_t iterations, uint32_t outputBytes, char* hexResult, uint8_t* binResult)  {
+    unsigned int i;
+    unsigned char digest[outputBytes];
+    PKCS5_PBKDF2_HMAC(pass, passlen, salt, saltlen, iterations, EVP_sha384(), outputBytes, digest);
+
+    printf("PBKDF2 result : ");
+    for (i = 0; i < sizeof(digest); i++)
+    {
+        printf("%02x", digest[i]);
+        binResult[i] = digest[i];
+    };
+    printf("\n");
+}
+
+void encrypt(FILE *ifp, FILE *ofp) {
+
+    fseek(ifp, 0L, SEEK_END);
+    int fsize = ftell(ifp);
+    fseek(ifp, 0L, SEEK_SET);
+
+    int outlen1 = 0, outlen2 = 0;
+
+    unsigned char *indata = malloc(fsize);
+    unsigned char *outdata = malloc(fsize*2);
+    unsigned char ckey[] = "thisisabadkey";
+    unsigned char ivec[] = "dontusethisinput";
+
+    fread(indata, sizeof(char), fsize, ifp);
+
+    EVP_CIPHER_CTX *ctx;
+    ctx = EVP_CIPHER_CTX_new();
+    EVP_EncryptInit(ctx, EVP_aes_256_cbc(), ckey, ivec);
+    EVP_EncryptUpdate(ctx, outdata, &outlen1, indata, fsize);
+    EVP_EncryptFinal(ctx, outdata+outlen1, &outlen2);
+    fwrite(outdata, sizeof(char), outlen1+outlen2, ofp);
+    printf("Encryption done\n");
+}
 
 int main(int argc, char** argv) {
     printf("Hello world of openssl\n");
 
-    unsigned char hash[SHA512_DIGEST_LENGTH];
-    calc_sha512("hello.txt", hash);
-    char password[256];
-    printf("Password : ");
-    scanf("%s", password);
+    char output[65];
+    const char *pass = "hello";
+    const unsigned char *salt = "KCl";
+    uint32_t outputBytes = 64;
+    char hexResult[2*outputBytes+1];
+    uint8_t binResult[outputBytes+1];
+    calc_sha512("hello.txt", output);
+    PBKDF2_HMAC_SHA_512(pass, 5, salt, 3, 4096, outputBytes, hexResult, binResult);
+
+    FILE *fIN, *fOUT;
+    fIN = fopen("hello.txt", "rb");
+    fOUT = fopen("hello.txt.uf", "wb");
     
-
-    printf("Creating SHA512\n");
-    SHA512(password, strlen(password), hash);
-
-    printf("SHA512 created\n");
-    for (int i = 0; i < SHA512_DIGEST_LENGTH; ++i) {
-        printf("%02x", hash[i]);
-    }
-    printf("\n");
-    // SSL_load_error_strings();
-    // ERR_load_BIO_strings();
-    // OpenSSL_add_all_algorithms();
-    // printf("Initialization done\n");
-    // BIO * bio;
-    // bio = BIO_new_connect("www.ibm.com:80");
-
-    // if (bio == NULL) {
-    //     printf("Connection failed\n");
-    //     return 0;
-    // }
-
-    // if (BIO_do_connect(bio) <= 0) {
-    //     printf("Failed connection\n");
-    //     return 0;
-    // }
-
-    // // void * buf;
-    // // if (BIO_write(bio, buf, 10) <= 0) {
-    // //     if (!BIO_should_retry(bio)) {
-    // //         printf("Failed writing");
-    // //     }
-    // // }
-    
-    // // int x = BIO_read(bio, buf, 10);
-    // // if (x == 0) {
-    // //     printf("Reading failed\n");
-    // //     return 0;
-    // // } 
-
-    // // printf("x = %d", x);
-
-    // printf("Connection successful\n");
-
-    // BIO_reset(bio);
-    // BIO_free_all(bio);
-
-    // SSL_CTX ctx = SSL_CTX_new(SSLv23_client_method());
-    // SSL ssl;
+    encrypt(fIN, fOUT);
+    calc_sha512("hello.txt.uf", output);
     return 0;
 }
